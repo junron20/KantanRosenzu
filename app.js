@@ -155,8 +155,8 @@ document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.s
 // pointer and wheel events would otherwise bubble to the map handlers.
 [info, routeList, search, filterPanel].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 filterPanel.addEventListener('wheel', event => event.stopPropagation());
-stage.addEventListener('selectstart', event => event.preventDefault()); stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); stage.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
-stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
+mapLayer.addEventListener('selectstart', event => event.preventDefault()); mapLayer.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); mapLayer.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
+mapLayer.addEventListener('pointerdown', event => { didDrag = false; mapLayer.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
 function movePointer(event) {
   const coalesced = event.type === 'pointermove' ? event.getCoalescedEvents?.() : null;
   const point = coalesced?.[coalesced.length - 1] ?? event;
@@ -175,8 +175,8 @@ function movePointer(event) {
 }
 // Apply the composited transform as soon as the input sample arrives. Browsers
 // that expose raw samples avoid the frame of latency added by pointermove.
-if ('onpointerrawupdate' in window) stage.addEventListener('pointerrawupdate', movePointer, { passive: true });
-else stage.addEventListener('pointermove', movePointer, { passive: true });
+if ('onpointerrawupdate' in window) mapLayer.addEventListener('pointerrawupdate', movePointer, { passive: true });
+else mapLayer.addEventListener('pointermove', movePointer, { passive: true });
 function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
 function endPointer(event) {
   const isTap = event.button === 0 && !didDrag && pointers.size === 1;
@@ -191,8 +191,8 @@ function endPointer(event) {
     activateMapTarget(target);
   }
 }
-stage.addEventListener('pointerup', endPointer); stage.addEventListener('pointercancel', endPointer);
-stage.addEventListener('click', event => {
+mapLayer.addEventListener('pointerup', endPointer); mapLayer.addEventListener('pointercancel', endPointer);
+mapLayer.addEventListener('click', event => {
   if (didDrag) return;
   if (performance.now() - handledTapAt < 500) return;
   activateMapTarget(event.target);
