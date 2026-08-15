@@ -13,7 +13,7 @@ const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANC
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null, mapBitmapTimer = 0, mapBitmapVersion = 0, mapBitmapReady = false;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, dragBitmapActive = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null, mapBitmapTimer = 0, mapBitmapVersion = 0, mapBitmapReady = false;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -176,6 +176,14 @@ function previewDrag(clientX, clientY) {
   // Recenter before the composited overscan is exhausted. This keeps already
   // painted map content visible while avoiding a viewBox repaint per input event.
   if (Math.abs(renderedDx) >= PAN_REBASE_DISTANCE || Math.abs(renderedDy) >= PAN_REBASE_DISTANCE) {
+    // A cached bitmap has finite overscan. Return to the SVG only for this
+    // rare long-drag rebase, rather than exposing a blank canvas edge.
+    if (dragBitmapActive) {
+      map.style.visibility = '';
+      mapBitmap.style.display = 'none';
+      mapBitmap.style.transform = '';
+      dragBitmapActive = false;
+    }
     applyView();
     mapLayer.style.transform = '';
     beginDrag(clientX, clientY);
@@ -187,6 +195,10 @@ function commitDrag(clientX, clientY) {
   previewDrag(clientX, clientY);
   applyView();
   mapLayer.style.transform = '';
+  map.style.visibility = '';
+  mapBitmap.style.display = 'none';
+  mapBitmap.style.transform = '';
+  dragBitmapActive = false;
   queueMapBitmap();
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
@@ -200,7 +212,7 @@ function commitWheelZoom() {
   zoomAt(preview.scale, preview.x, preview.y, false);
   mapLayer.style.transform = '';
   mapLayer.style.transformOrigin = '';
-  mapLayer.style.visibility = '';
+  map.style.visibility = '';
   mapBitmap.style.display = 'none';
   mapBitmap.style.transform = '';
   mapBitmap.style.transformOrigin = '';
@@ -212,7 +224,7 @@ function queueWheelZoom(factor, clientX, clientY) {
     wheelPreview = { scale: view.scale, x: clientX, y: clientY, originX: clientX - rect.left + PAN_OVERSCAN, originY: clientY - rect.top + PAN_OVERSCAN, useBitmap: mapBitmapReady };
     const previewLayer = wheelPreview.useBitmap ? mapBitmap : mapLayer;
     previewLayer.style.transformOrigin = `${wheelPreview.originX}px ${wheelPreview.originY}px`;
-    if (wheelPreview.useBitmap) { mapLayer.style.visibility = 'hidden'; mapBitmap.style.display = 'block'; }
+    if (wheelPreview.useBitmap) { map.style.visibility = 'hidden'; mapBitmap.style.display = 'block'; }
   }
   wheelPreview.scale = Math.max(limits.min, Math.min(limits.max, wheelPreview.scale * factor));
   (wheelPreview.useBitmap ? mapBitmap : mapLayer).style.transform = `translate3d(0,0,0) scale3d(${wheelPreview.scale / view.scale}, ${wheelPreview.scale / view.scale}, 1)`;
@@ -249,7 +261,14 @@ function movePointer(event) {
     scheduleZoomRender();
   } else if (pair.length === 1 && dragStart) {
     const dx = point.clientX - dragStart.x, dy = point.clientY - dragStart.y;
-    if (Math.hypot(dx, dy) > 4) didDrag = true;
+    if (Math.hypot(dx, dy) > 4) {
+      didDrag = true;
+      if (mapBitmapReady && !dragBitmapActive) {
+        map.style.visibility = 'hidden';
+        mapBitmap.style.display = 'block';
+        dragBitmapActive = true;
+      }
+    }
     previewDrag(point.clientX, point.clientY);
   }
 }
@@ -265,7 +284,14 @@ function endPointer(event) {
   if (isDrag) commitDrag(event.clientX, event.clientY);
   pointers.delete(event.pointerId);
   if (pointers.size < 2) pinchStart = null;
-  if (!pointers.size) dragStart = null;
+  if (!pointers.size) {
+    dragStart = null;
+    if (!isDrag && dragBitmapActive) {
+      map.style.visibility = '';
+      mapBitmap.style.display = 'none';
+      dragBitmapActive = false;
+    }
+  }
   if (isTap) {
     handledTapAt = performance.now();
     activateMapTarget(target);
