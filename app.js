@@ -121,17 +121,24 @@ function applyView() {
   map.setAttribute('viewBox', `${box.x - extraX} ${box.y - extraY} ${box.width + extraX * 2} ${box.height + extraY * 2}`);
   zoomStatus.textContent = `${Math.round(view.scale * 100)}%`;
 }
-function updateDrag(clientX, clientY) {
+function previewDrag(clientX, clientY) {
   if (!dragStart) return;
-  const rect = stage.getBoundingClientRect();
   const dx = clientX - dragStart.x, dy = clientY - dragStart.y;
-  view.centerX = dragStart.centerX - dx * dragStart.box.width / rect.width;
-  view.centerY = dragStart.centerY - dy * dragStart.box.height / rect.height;
-  applyView();
+  view.centerX = dragStart.centerX - dx * dragStart.box.width / dragStart.rect.width;
+  view.centerY = dragStart.centerY - dy * dragStart.box.height / dragStart.rect.height;
+  clampView();
+  // Moving the already-painted SVG is a compositor operation. Rebuilding its viewBox
+  // for every pointer sample forces the browser to repaint every path and label.
+  const renderedDx = -(view.centerX - dragStart.centerX) * dragStart.rect.width / dragStart.box.width;
+  const renderedDy = -(view.centerY - dragStart.centerY) * dragStart.rect.height / dragStart.box.height;
+  map.style.transform = `translate3d(${renderedDx}px, ${renderedDy}px, 0)`;
 }
-function beginDrag(clientX, clientY) { dragStart = { x: clientX, y: clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox() }; }
+function beginDrag(clientX, clientY) { dragStart = { x: clientX, y: clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox(), rect: stage.getBoundingClientRect() }; }
 function commitDrag(clientX, clientY) {
-  updateDrag(clientX, clientY);
+  if (!dragStart) return;
+  previewDrag(clientX, clientY);
+  applyView();
+  map.style.transform = '';
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); render(); }
 function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); }
@@ -148,7 +155,8 @@ document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.s
 stage.addEventListener('selectstart', event => event.preventDefault()); stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); stage.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
 function movePointer(event) {
-  const points = event.getCoalescedEvents?.() ?? [event], point = points[points.length - 1];
+  const coalesced = event.type === 'pointermove' ? event.getCoalescedEvents?.() : null;
+  const point = coalesced?.[coalesced.length - 1] ?? event;
   if (!pointers.has(point.pointerId)) return;
   pointers.set(point.pointerId, { x: point.clientX, y: point.clientY });
   const pair = [...pointers.values()];
@@ -159,9 +167,11 @@ function movePointer(event) {
   } else if (pair.length === 1 && dragStart) {
     const dx = point.clientX - dragStart.x, dy = point.clientY - dragStart.y;
     if (Math.hypot(dx, dy) > 4) didDrag = true;
-    updateDrag(point.clientX, point.clientY);
+    previewDrag(point.clientX, point.clientY);
   }
 }
+// Apply the composited transform as soon as the input sample arrives. Browsers
+// that expose raw samples avoid the frame of latency added by pointermove.
 if ('onpointerrawupdate' in window) stage.addEventListener('pointerrawupdate', movePointer, { passive: true });
 else stage.addEventListener('pointermove', movePointer, { passive: true });
 function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
