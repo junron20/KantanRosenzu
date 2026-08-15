@@ -13,7 +13,7 @@ const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANC
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelFrame = 0, wheelScale = null, wheelPoint = null, wheelRenderTimer = 0;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -151,16 +151,8 @@ function commitDrag(clientX, clientY) {
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
 function scheduleZoomRender() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; render(); }, 100); }
 function queueWheelZoom(factor, clientX, clientY) {
-  wheelScale = (wheelScale ?? view.scale) * factor;
-  wheelPoint = { x: clientX, y: clientY };
-  if (wheelFrame) return;
-  wheelFrame = requestAnimationFrame(() => {
-    wheelFrame = 0;
-    zoomAt(wheelScale, wheelPoint.x, wheelPoint.y, false);
-    wheelScale = null;
-    wheelPoint = null;
-    scheduleZoomRender();
-  });
+  zoomAt(view.scale * factor, clientX, clientY, false);
+  scheduleZoomRender();
 }
 function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); }
 function pinchData(pair) { const [a, b] = pair; return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
