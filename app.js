@@ -1,11 +1,12 @@
 const data = window.TokyoJrData;
+document.head.insertAdjacentHTML('beforeend', '<style>.map-stage svg{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px)}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.data-label{pointer-events:auto;cursor:pointer}.data-label:hover{fill:#ef774c;font-weight:800}.info-line{display:grid;grid-template-columns:15px 17px 1fr;gap:6px;align-items:center;width:100%;padding:5px 7px;border:0;border-radius:4px;background:#e7f1ed;color:#33755f;font:10px \'Noto Sans JP\',sans-serif;cursor:pointer}.info-line input{accent-color:#17322d}.info-line:hover{filter:brightness(.95)}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:none}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}</style>');
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
 document.querySelector('.legend.civic')?.parentElement?.remove();
 const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const info = document.querySelector('#info');
 const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const stationList = document.querySelector('#station-list'); const zoomStatus = document.querySelector('#zoom-status');
-const MAP_WIDTH = 1200, MAP_HEIGHT = 760, limits = { min: .8, max: 5 };
+const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
@@ -100,7 +101,13 @@ function selectStation(station) {
 }
 function viewBox() { const width = MAP_WIDTH / view.scale, height = MAP_HEIGHT / view.scale; return { width, height, x: view.centerX - width / 2, y: view.centerY - height / 2 }; }
 function clampView() { const box = viewBox(); view.centerX = Math.max(box.width / 2, Math.min(MAP_WIDTH - box.width / 2, view.centerX)); view.centerY = Math.max(box.height / 2, Math.min(MAP_HEIGHT - box.height / 2, view.centerY)); }
-function applyView() { clampView(); const box = viewBox(); map.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`); zoomStatus.textContent = `${Math.round(view.scale * 100)}%`; }
+function applyView() {
+  clampView();
+  const box = viewBox(), rect = stage.getBoundingClientRect();
+  const extraX = PAN_OVERSCAN * box.width / Math.max(1, rect.width), extraY = PAN_OVERSCAN * box.height / Math.max(1, rect.height);
+  map.setAttribute('viewBox', `${box.x - extraX} ${box.y - extraY} ${box.width + extraX * 2} ${box.height + extraY * 2}`);
+  zoomStatus.textContent = `${Math.round(view.scale * 100)}%`;
+}
 function moveMapDuringDrag(dx, dy) { map.style.transform = `translate3d(${dx}px, ${dy}px, 0)`; }
 function commitDrag(clientX, clientY) {
   if (!dragStart) return;
