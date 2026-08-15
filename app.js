@@ -2,18 +2,18 @@ const data = window.TokyoJrData;
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./operator-icons.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./route-signs.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<style>.map-stage svg{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px)}</style>');
-document.head.insertAdjacentHTML('beforeend', '<style>#map-layer{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
+document.head.insertAdjacentHTML('beforeend', '<style>#map-layer,#map-bitmap{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{display:none;pointer-events:none}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.data-label{pointer-events:auto;cursor:pointer}.data-label:hover{fill:#ef774c;font-weight:800}.info-line{display:grid;grid-template-columns:15px 17px 1fr;gap:6px;align-items:center;width:100%;padding:5px 7px;border:0;border-radius:4px;background:#e7f1ed;color:#33755f;font:10px \'Noto Sans JP\',sans-serif;cursor:pointer}.info-line input{accent-color:#17322d}.info-line:hover{filter:brightness(.95)}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:none}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}</style>');
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
 document.querySelector('.legend.civic')?.parentElement?.remove();
-const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const mapLayer = document.createElement('div'); mapLayer.id = 'map-layer'; map.before(mapLayer); mapLayer.append(map); const info = document.querySelector('#info');
+const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const mapLayer = document.createElement('div'); mapLayer.id = 'map-layer'; map.before(mapLayer); mapLayer.append(map); const mapBitmap = document.createElement('canvas'); mapBitmap.id = 'map-bitmap'; mapLayer.before(mapBitmap); const info = document.querySelector('#info');
 const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const filterPanel = document.querySelector('.filter-panel'); const zoomStatus = document.querySelector('#zoom-status');
 const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANCE = PAN_OVERSCAN - 96, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null, mapBitmapTimer = 0, mapBitmapVersion = 0, mapBitmapReady = false;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -69,6 +69,44 @@ function render() {
   const labels = labelLayout(stations).map(({ station, x, y, fontSize }) => `<text class="data-label${isSeibu(station) ? ' seibu-label' : ''}${isMetro(station) ? ' metro-label' : ''}${station.id === selectedStationId ? ' is-selected-label' : ''}" data-station-id="${station.id}" x="${x + fontSize}" y="${y - fontSize}" font-size="${fontSize}" role="button" tabindex="0">${esc(station.name)}</text>`).join('');
   map.innerHTML = `<rect width="${MAP_WIDTH}" height="${MAP_HEIGHT}" fill="#f3f5f0"/><g id="boundaries">${boundaryPaths}</g><g id="rail-lines">${railPaths}</g><g id="connections">${marks}</g><g id="rail">${dots}</g><g id="labels">${labels}</g>`;
   document.querySelectorAll('[data-layer]').forEach(input => { const target = document.querySelector(`#${input.dataset.layer}`); if (target) target.classList.toggle('hidden', !input.checked); });
+  queueMapBitmap();
+}
+function mapStylesForBitmap() {
+  return '.municipal-boundary{fill:#e6ede7;stroke:#b9c8bd;stroke-width:1.4}.rail-geometry{fill:none;stroke:var(--line-color);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;opacity:.86}.rail-geometry.seibu-geometry{stroke-width:4}.rail-geometry.is-dimmed{opacity:.13}.rail-geometry.is-highlighted{stroke-width:7;opacity:1}.data-station circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.seibu circle{fill:#f4bd20}.data-station.metro circle{fill:#667783}.data-station.interchange circle{fill:#17322d;stroke:#f8c154;stroke-width:2}.data-station.is-selected circle{stroke:#17322d;stroke-width:3}.data-label{font-family:"Noto Sans JP",sans-serif;fill:#254039;paint-order:stroke;stroke:#f3f5f0;stroke-width:3px;stroke-linejoin:round}.seibu-label{fill:#6d5512}.metro-label{fill:#405260}.is-selected-label{font-weight:800;fill:#17322d}.hidden{display:none!important}';
+}
+async function buildMapBitmap() {
+  const version = mapBitmapVersion, width = mapLayer.clientWidth, height = mapLayer.clientHeight;
+  if (!width || !height) return;
+  const clone = map.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('width', width);
+  clone.setAttribute('height', height);
+  const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  style.textContent = mapStylesForBitmap();
+  clone.prepend(style);
+  const markup = clone.outerHTML;
+  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }));
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    if (version !== mapBitmapVersion) return;
+    const ratio = window.devicePixelRatio || 1;
+    mapBitmap.width = Math.round(width * ratio);
+    mapBitmap.height = Math.round(height * ratio);
+    const context = mapBitmap.getContext('2d');
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    mapBitmapReady = true;
+  } catch { mapBitmapReady = false; }
+  finally { URL.revokeObjectURL(url); }
+}
+function queueMapBitmap() {
+  mapBitmapReady = false;
+  mapBitmapVersion++;
+  clearTimeout(mapBitmapTimer);
+  mapBitmapTimer = setTimeout(buildMapBitmap, 120);
 }
 function renderRoutes() {
   const groups = [['JR東日本', Object.keys(data.lines).filter(line => !isSeibuLine(line) && !isMetroLine(line))], ['西武鉄道', Object.keys(data.lines).filter(isSeibuLine)], ['東京メトロ', Object.keys(data.lines).filter(isMetroLine)]];
@@ -147,6 +185,7 @@ function commitDrag(clientX, clientY) {
   previewDrag(clientX, clientY);
   applyView();
   mapLayer.style.transform = '';
+  queueMapBitmap();
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
 function scheduleZoomRender() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; render(); }, 100); }
@@ -159,20 +198,26 @@ function commitWheelZoom() {
   zoomAt(preview.scale, preview.x, preview.y, false);
   mapLayer.style.transform = '';
   mapLayer.style.transformOrigin = '';
+  mapLayer.style.visibility = '';
+  mapBitmap.style.display = 'none';
+  mapBitmap.style.transform = '';
+  mapBitmap.style.transformOrigin = '';
   render();
 }
 function queueWheelZoom(factor, clientX, clientY) {
   if (!wheelPreview) {
     const rect = stage.getBoundingClientRect();
-    wheelPreview = { scale: view.scale, x: clientX, y: clientY, originX: clientX - rect.left + PAN_OVERSCAN, originY: clientY - rect.top + PAN_OVERSCAN };
-    mapLayer.style.transformOrigin = `${wheelPreview.originX}px ${wheelPreview.originY}px`;
+    wheelPreview = { scale: view.scale, x: clientX, y: clientY, originX: clientX - rect.left + PAN_OVERSCAN, originY: clientY - rect.top + PAN_OVERSCAN, useBitmap: mapBitmapReady };
+    const previewLayer = wheelPreview.useBitmap ? mapBitmap : mapLayer;
+    previewLayer.style.transformOrigin = `${wheelPreview.originX}px ${wheelPreview.originY}px`;
+    if (wheelPreview.useBitmap) { mapLayer.style.visibility = 'hidden'; mapBitmap.style.display = 'block'; }
   }
   wheelPreview.scale = Math.max(limits.min, Math.min(limits.max, wheelPreview.scale * factor));
-  mapLayer.style.transform = `scale(${wheelPreview.scale / view.scale})`;
+  (wheelPreview.useBitmap ? mapBitmap : mapLayer).style.transform = `translate3d(0,0,0) scale3d(${wheelPreview.scale / view.scale}, ${wheelPreview.scale / view.scale}, 1)`;
   clearTimeout(wheelRenderTimer);
   wheelRenderTimer = setTimeout(commitWheelZoom, 80);
 }
-function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); }
+function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); queueMapBitmap(); }
 function pinchData(pair) { const [a, b] = pair; return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
 if (!data?.stations?.length || !data?.railways?.length) throw new Error('地図データを読み込めませんでした。');
