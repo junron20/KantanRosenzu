@@ -101,6 +101,16 @@ function selectStation(station) {
 function viewBox() { const width = MAP_WIDTH / view.scale, height = MAP_HEIGHT / view.scale; return { width, height, x: view.centerX - width / 2, y: view.centerY - height / 2 }; }
 function clampView() { const box = viewBox(); view.centerX = Math.max(box.width / 2, Math.min(MAP_WIDTH - box.width / 2, view.centerX)); view.centerY = Math.max(box.height / 2, Math.min(MAP_HEIGHT - box.height / 2, view.centerY)); }
 function applyView() { clampView(); const box = viewBox(); map.setAttribute('viewBox', `${box.x} ${box.y} ${box.width} ${box.height}`); zoomStatus.textContent = `${Math.round(view.scale * 100)}%`; }
+function moveMapDuringDrag(dx, dy) { map.style.transform = `translate3d(${dx}px, ${dy}px, 0)`; }
+function commitDrag(clientX, clientY) {
+  if (!dragStart) return;
+  const rect = stage.getBoundingClientRect();
+  const dx = clientX - dragStart.x, dy = clientY - dragStart.y;
+  view.centerX = dragStart.centerX - dx * dragStart.box.width / rect.width;
+  view.centerY = dragStart.centerY - dy * dragStart.box.height / rect.height;
+  map.style.transform = '';
+  applyView();
+}
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); render(); }
 function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); }
 function pinchData(pair) { const [a, b] = pair; return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
@@ -117,12 +127,14 @@ document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.s
 // Keep the map's drag/pinch handlers from capturing clicks intended for card controls.
 [info, stationList].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 stage.addEventListener('selectstart', event => event.preventDefault()); stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); stage.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
-stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) dragStart = { x: event.clientX, y: event.clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox() }; if (pair.length === 2) pinchStart = { ...pinchData(pair), scale: view.scale }; });
-stage.addEventListener('pointermove', event => { if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 2 && pinchStart) { didDrag = true; const pinch = pinchData(pair); zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y); } else if (pair.length === 1 && dragStart) { const dx = event.clientX - dragStart.x, dy = event.clientY - dragStart.y; if (Math.hypot(dx, dy) > 4) didDrag = true; const rect = stage.getBoundingClientRect(); view.centerX = dragStart.centerX - dx * dragStart.box.width / rect.width; view.centerY = dragStart.centerY - dy * dragStart.box.height / rect.height; applyView(); } });
+stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) dragStart = { x: event.clientX, y: event.clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox() }; if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
+stage.addEventListener('pointermove', event => { if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 2 && pinchStart) { didDrag = true; const pinch = pinchData(pair); zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y); } else if (pair.length === 1 && dragStart) { const dx = event.clientX - dragStart.x, dy = event.clientY - dragStart.y; if (Math.hypot(dx, dy) > 4) didDrag = true; moveMapDuringDrag(dx, dy); } });
 function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
 function endPointer(event) {
   const isTap = event.button === 0 && !didDrag && pointers.size === 1;
+  const isDrag = didDrag && pointers.size === 1;
   const target = isTap ? document.elementFromPoint(event.clientX, event.clientY) : null;
+  if (isDrag) commitDrag(event.clientX, event.clientY);
   pointers.delete(event.pointerId);
   if (pointers.size < 2) pinchStart = null;
   if (!pointers.size) dragStart = null;
@@ -133,6 +145,7 @@ function endPointer(event) {
 }
 stage.addEventListener('pointerup', endPointer); stage.addEventListener('pointercancel', endPointer);
 stage.addEventListener('click', event => {
+  if (didDrag) return;
   if (performance.now() - handledTapAt < 500) return;
   activateMapTarget(event.target);
 });
