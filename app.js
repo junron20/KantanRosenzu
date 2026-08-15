@@ -261,8 +261,8 @@ function movePointer(event) {
 }
 // Apply the composited transform as soon as the input sample arrives. Browsers
 // that expose raw samples avoid the frame of latency added by pointermove.
+mapLayer.addEventListener('pointermove', movePointer, { passive: true });
 if ('onpointerrawupdate' in window) mapLayer.addEventListener('pointerrawupdate', movePointer, { passive: true });
-else mapLayer.addEventListener('pointermove', movePointer, { passive: true });
 function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
 function endPointer(event) {
   const isTap = event.button === 0 && !didDrag && pointers.size === 1;
