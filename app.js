@@ -2,7 +2,7 @@ const data = window.TokyoJrData;
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./operator-icons.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./route-signs.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<style>.map-stage svg{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px)}</style>');
-document.head.insertAdjacentHTML('beforeend', '<style>#map-layer,#map-bitmap{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{display:none;pointer-events:none}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
+document.head.insertAdjacentHTML('beforeend', '<style>#map-layer{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none;will-change:transform;transform:translate3d(0,0,0)}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}#map-layer svg.map-cached{opacity:0}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.data-label{pointer-events:auto;cursor:pointer}.data-label:hover{fill:#ef774c;font-weight:800}.info-line{display:grid;grid-template-columns:15px 17px 1fr;gap:6px;align-items:center;width:100%;padding:5px 7px;border:0;border-radius:4px;background:#e7f1ed;color:#33755f;font:10px \'Noto Sans JP\',sans-serif;cursor:pointer}.info-line input{accent-color:#17322d}.info-line:hover{filter:brightness(.95)}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:none}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}</style>');
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
@@ -99,11 +99,18 @@ async function buildMapBitmap() {
     context.clearRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
     mapBitmapReady = true;
+    mapBitmap.style.display = 'block';
+    map.classList.add('map-cached');
+    // Keep the old bitmap under the composited transform until the replacement
+    // is fully painted, then atomically return to the exact current view.
+    mapLayer.style.transform = '';
+    mapLayer.style.transformOrigin = '';
+    mapBitmap.style.transform = '';
+    mapBitmap.style.transformOrigin = '';
   } catch { mapBitmapReady = false; }
   finally { URL.revokeObjectURL(url); }
 }
 function queueMapBitmap() {
-  mapBitmapReady = false;
   mapBitmapVersion++;
   clearTimeout(mapBitmapTimer);
   mapBitmapTimer = setTimeout(buildMapBitmap, 120);
@@ -184,7 +191,6 @@ function commitDrag(clientX, clientY) {
   if (!dragStart) return;
   previewDrag(clientX, clientY);
   applyView();
-  mapLayer.style.transform = '';
   queueMapBitmap();
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
@@ -196,12 +202,6 @@ function commitWheelZoom() {
   const preview = wheelPreview;
   wheelPreview = null;
   zoomAt(preview.scale, preview.x, preview.y, false);
-  mapLayer.style.transform = '';
-  mapLayer.style.transformOrigin = '';
-  mapLayer.style.visibility = '';
-  mapBitmap.style.display = 'none';
-  mapBitmap.style.transform = '';
-  mapBitmap.style.transformOrigin = '';
   render();
 }
 function queueWheelZoom(factor, clientX, clientY) {
@@ -210,7 +210,6 @@ function queueWheelZoom(factor, clientX, clientY) {
     wheelPreview = { scale: view.scale, x: clientX, y: clientY, originX: clientX - rect.left + PAN_OVERSCAN, originY: clientY - rect.top + PAN_OVERSCAN, useBitmap: mapBitmapReady };
     const previewLayer = wheelPreview.useBitmap ? mapBitmap : mapLayer;
     previewLayer.style.transformOrigin = `${wheelPreview.originX}px ${wheelPreview.originY}px`;
-    if (wheelPreview.useBitmap) { mapLayer.style.visibility = 'hidden'; mapBitmap.style.display = 'block'; }
   }
   wheelPreview.scale = Math.max(limits.min, Math.min(limits.max, wheelPreview.scale * factor));
   (wheelPreview.useBitmap ? mapBitmap : mapLayer).style.transform = `translate3d(0,0,0) scale3d(${wheelPreview.scale / view.scale}, ${wheelPreview.scale / view.scale}, 1)`;
