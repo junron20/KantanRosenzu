@@ -10,7 +10,8 @@ createServer(async (request, response) => {
   const file = normalize(join(root, pathname));
   if (!file.startsWith(root)) return response.writeHead(403).end('Forbidden');
   try {
+    const content = await readFile(file);
     response.writeHead(200, { 'content-type': `${types[extname(file)] || 'application/octet-stream'}; charset=utf-8` });
-    response.end(await readFile(file));
+    response.end(content);
   } catch { response.writeHead(404).end('Not found'); }
 }).listen(4173, '0.0.0.0', () => console.log('Preview: http://localhost:4173'));
