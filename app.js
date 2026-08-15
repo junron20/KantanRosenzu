@@ -13,7 +13,7 @@ const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANC
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null, mapBitmapTimer = 0, mapBitmapVersion = 0, mapBitmapReady = false;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null, mapBitmapTimer = 0, mapBitmapVersion = 0, mapBitmapReady = false, bitmapView = null;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -77,6 +77,8 @@ function mapStylesForBitmap() {
 async function buildMapBitmap() {
   const version = mapBitmapVersion, width = mapLayer.clientWidth, height = mapLayer.clientHeight;
   if (!width || !height) return;
+  applyView();
+  const sourceView = { ...view };
   const clone = map.cloneNode(true);
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   clone.setAttribute('width', width);
@@ -91,8 +93,7 @@ async function buildMapBitmap() {
     image.src = url;
     await image.decode();
     if (version !== mapBitmapVersion) return;
-    // A 1x preview cuts Canvas memory and texture bandwidth by up to 75% on
-    // high-DPI screens. It is used only while the wheel is moving.
+    // Keep the interactive texture deliberately small.
     const ratio = 1;
     mapBitmap.width = Math.round(width * ratio);
     mapBitmap.height = Math.round(height * ratio);
@@ -100,12 +101,15 @@ async function buildMapBitmap() {
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
+    bitmapView = sourceView;
     mapBitmapReady = true;
+    mapBitmap.style.display = 'block';
+    map.style.opacity = '0';
+    updateBitmapTransform();
   } catch { mapBitmapReady = false; }
   finally { URL.revokeObjectURL(url); }
 }
 function queueMapBitmap() {
-  mapBitmapReady = false;
   mapBitmapVersion++;
   clearTimeout(mapBitmapTimer);
   mapBitmapTimer = setTimeout(buildMapBitmap, 120);
@@ -162,12 +166,26 @@ function applyView() {
   map.setAttribute('viewBox', `${box.x - extraX} ${box.y - extraY} ${box.width + extraX * 2} ${box.height + extraY * 2}`);
   zoomStatus.textContent = `${Math.round(view.scale * 100)}%`;
 }
+function updateBitmapTransform() {
+  if (!mapBitmapReady || !bitmapView) return;
+  const rect = stage.getBoundingClientRect();
+  const scale = view.scale / bitmapView.scale;
+  const originX = PAN_OVERSCAN + rect.width / 2, originY = PAN_OVERSCAN + rect.height / 2;
+  const tx = originX * (1 - scale) + (bitmapView.centerX - view.centerX) * view.scale * rect.width / MAP_WIDTH;
+  const ty = originY * (1 - scale) + (bitmapView.centerY - view.centerY) * view.scale * rect.height / MAP_HEIGHT;
+  mapBitmap.style.transformOrigin = '0 0';
+  mapBitmap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale3d(${scale}, ${scale}, 1)`;
+}
 function previewDrag(clientX, clientY) {
   if (!dragStart) return;
   const dx = clientX - dragStart.x, dy = clientY - dragStart.y;
   view.centerX = dragStart.centerX - dx * dragStart.box.width / dragStart.rect.width;
   view.centerY = dragStart.centerY - dy * dragStart.box.height / dragStart.rect.height;
   clampView();
+  if (mapBitmapReady) {
+    updateBitmapTransform();
+    return;
+  }
   // Moving the already-painted SVG is a compositor operation. Rebuilding its viewBox
   // for every pointer sample forces the browser to repaint every path and label.
   const renderedDx = -(view.centerX - dragStart.centerX) * dragStart.rect.width / dragStart.box.width;
@@ -189,33 +207,20 @@ function commitDrag(clientX, clientY) {
   mapLayer.style.transform = '';
   queueMapBitmap();
 }
-function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
+function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true, shouldApplyView = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; if (shouldApplyView) applyView(); if (shouldRender) render(); }
 function scheduleZoomRender() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; render(); }, 100); }
 function commitWheelZoom() {
   if (!wheelPreview) return;
   clearTimeout(wheelRenderTimer);
   wheelRenderTimer = 0;
-  const preview = wheelPreview;
   wheelPreview = null;
-  zoomAt(preview.scale, preview.x, preview.y, false);
-  mapLayer.style.transform = '';
-  mapLayer.style.transformOrigin = '';
-  map.style.visibility = '';
-  mapBitmap.style.display = 'none';
-  mapBitmap.style.transform = '';
-  mapBitmap.style.transformOrigin = '';
+  applyView();
   render();
 }
 function queueWheelZoom(factor, clientX, clientY) {
-  if (!wheelPreview) {
-    const rect = stage.getBoundingClientRect();
-    wheelPreview = { scale: view.scale, x: clientX, y: clientY, originX: clientX - rect.left + PAN_OVERSCAN, originY: clientY - rect.top + PAN_OVERSCAN, useBitmap: mapBitmapReady };
-    const previewLayer = wheelPreview.useBitmap ? mapBitmap : mapLayer;
-    previewLayer.style.transformOrigin = `${wheelPreview.originX}px ${wheelPreview.originY}px`;
-    if (wheelPreview.useBitmap) { map.style.visibility = 'hidden'; mapBitmap.style.display = 'block'; }
-  }
-  wheelPreview.scale = Math.max(limits.min, Math.min(limits.max, wheelPreview.scale * factor));
-  (wheelPreview.useBitmap ? mapBitmap : mapLayer).style.transform = `translate3d(0,0,0) scale3d(${wheelPreview.scale / view.scale}, ${wheelPreview.scale / view.scale}, 1)`;
+  wheelPreview = true;
+  zoomAt(view.scale * factor, clientX, clientY, false, false);
+  updateBitmapTransform();
   clearTimeout(wheelRenderTimer);
   wheelRenderTimer = setTimeout(commitWheelZoom, 80);
 }
@@ -245,7 +250,8 @@ function movePointer(event) {
   if (pair.length === 2 && pinchStart) {
     didDrag = true;
     const pinch = pinchData(pair);
-    zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y, false);
+    zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y, false, false);
+    updateBitmapTransform();
     scheduleZoomRender();
   } else if (pair.length === 1 && dragStart) {
     const dx = point.clientX - dragStart.x, dy = point.clientY - dragStart.y;
