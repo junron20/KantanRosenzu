@@ -13,7 +13,7 @@ const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANC
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelRenderTimer = 0, wheelPreview = null;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -150,9 +150,27 @@ function commitDrag(clientX, clientY) {
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
 function scheduleZoomRender() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; render(); }, 100); }
+function commitWheelZoom() {
+  if (!wheelPreview) return;
+  clearTimeout(wheelRenderTimer);
+  wheelRenderTimer = 0;
+  const preview = wheelPreview;
+  wheelPreview = null;
+  zoomAt(preview.scale, preview.x, preview.y, false);
+  mapLayer.style.transform = '';
+  mapLayer.style.transformOrigin = '';
+  render();
+}
 function queueWheelZoom(factor, clientX, clientY) {
-  zoomAt(view.scale * factor, clientX, clientY, false);
-  scheduleZoomRender();
+  if (!wheelPreview) {
+    const rect = stage.getBoundingClientRect();
+    wheelPreview = { scale: view.scale, x: clientX, y: clientY, originX: clientX - rect.left + PAN_OVERSCAN, originY: clientY - rect.top + PAN_OVERSCAN };
+    mapLayer.style.transformOrigin = `${wheelPreview.originX}px ${wheelPreview.originY}px`;
+  }
+  wheelPreview.scale = Math.max(limits.min, Math.min(limits.max, wheelPreview.scale * factor));
+  mapLayer.style.transform = `scale(${wheelPreview.scale / view.scale})`;
+  clearTimeout(wheelRenderTimer);
+  wheelRenderTimer = setTimeout(commitWheelZoom, 80);
 }
 function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); }
 function pinchData(pair) { const [a, b] = pair; return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
@@ -162,12 +180,13 @@ document.querySelector('#source-label').textContent = `— ${stationGroups.lengt
 info.querySelector('h2').textContent = `${stationGroups.length}駅を表示中`;
 renderRoutes(); render(); applyView();
 search.addEventListener('input', render); document.querySelector('#clear').addEventListener('click', () => { search.value = ''; selectedLines.clear(); Object.keys(data.lines).forEach(line => selectedLines.add(line)); renderRoutes(); render(); }); document.querySelectorAll('[data-layer]').forEach(input => input.addEventListener('change', render));
-document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.scale * 1.25)); document.querySelector('#zoom-out').addEventListener('click', () => zoomAt(view.scale / 1.25)); document.querySelector('#reset-view').addEventListener('click', resetView); document.querySelector('#close-card').addEventListener('click', clearStationSelection);
+document.querySelector('#zoom-in').addEventListener('click', () => { commitWheelZoom(); zoomAt(view.scale * 1.25); }); document.querySelector('#zoom-out').addEventListener('click', () => { commitWheelZoom(); zoomAt(view.scale / 1.25); }); document.querySelector('#reset-view').addEventListener('click', () => { commitWheelZoom(); resetView(); }); document.querySelector('#close-card').addEventListener('click', clearStationSelection);
 // Keep map gestures inside the map. The filter panel lives in the stage so its
 // pointer and wheel events would otherwise bubble to the map handlers.
 [info, routeList, search, filterPanel].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 filterPanel.addEventListener('wheel', event => event.stopPropagation());
 mapLayer.addEventListener('wheel', event => { event.preventDefault(); event.stopImmediatePropagation(); queueWheelZoom(event.deltaY < 0 ? 1.12 : .89, event.clientX, event.clientY); }, { capture: true, passive: false });
+mapLayer.addEventListener('pointerdown', commitWheelZoom, { capture: true });
 mapLayer.addEventListener('selectstart', event => event.preventDefault()); mapLayer.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); mapLayer.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 mapLayer.addEventListener('pointerdown', event => { didDrag = false; mapLayer.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
 function movePointer(event) {
