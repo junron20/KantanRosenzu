@@ -9,11 +9,11 @@ document.querySelector('[data-layer="connections"]')?.closest('label')?.remove()
 document.querySelector('.legend.civic')?.parentElement?.remove();
 const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const mapLayer = document.createElement('div'); mapLayer.id = 'map-layer'; map.before(mapLayer); mapLayer.append(map); const info = document.querySelector('#info');
 const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const filterPanel = document.querySelector('.filter-panel'); const zoomStatus = document.querySelector('#zoom-status');
-const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
+const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANCE = PAN_OVERSCAN - 96, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, wheelFrame = 0, wheelScale = null, wheelPoint = null, wheelRenderTimer = 0;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -133,6 +133,13 @@ function previewDrag(clientX, clientY) {
   const renderedDx = -(view.centerX - dragStart.centerX) * dragStart.rect.width / dragStart.box.width;
   const renderedDy = -(view.centerY - dragStart.centerY) * dragStart.rect.height / dragStart.box.height;
   mapLayer.style.transform = `translate3d(${renderedDx}px, ${renderedDy}px, 0)`;
+  // Recenter before the composited overscan is exhausted. This keeps already
+  // painted map content visible while avoiding a viewBox repaint per input event.
+  if (Math.abs(renderedDx) >= PAN_REBASE_DISTANCE || Math.abs(renderedDy) >= PAN_REBASE_DISTANCE) {
+    applyView();
+    mapLayer.style.transform = '';
+    beginDrag(clientX, clientY);
+  }
 }
 function beginDrag(clientX, clientY) { dragStart = { x: clientX, y: clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox(), rect: stage.getBoundingClientRect() }; }
 function commitDrag(clientX, clientY) {
@@ -141,7 +148,20 @@ function commitDrag(clientX, clientY) {
   applyView();
   mapLayer.style.transform = '';
 }
-function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); render(); }
+function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); if (shouldRender) render(); }
+function scheduleZoomRender() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; render(); }, 100); }
+function queueWheelZoom(factor, clientX, clientY) {
+  wheelScale = (wheelScale ?? view.scale) * factor;
+  wheelPoint = { x: clientX, y: clientY };
+  if (wheelFrame) return;
+  wheelFrame = requestAnimationFrame(() => {
+    wheelFrame = 0;
+    zoomAt(wheelScale, wheelPoint.x, wheelPoint.y, false);
+    wheelScale = null;
+    wheelPoint = null;
+    scheduleZoomRender();
+  });
+}
 function resetView() { view.scale = 1; view.centerX = MAP_WIDTH / 2; view.centerY = MAP_HEIGHT / 2; applyView(); }
 function pinchData(pair) { const [a, b] = pair; return { distance: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
@@ -155,6 +175,7 @@ document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.s
 // pointer and wheel events would otherwise bubble to the map handlers.
 [info, routeList, search, filterPanel].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 filterPanel.addEventListener('wheel', event => event.stopPropagation());
+mapLayer.addEventListener('wheel', event => { event.preventDefault(); event.stopImmediatePropagation(); queueWheelZoom(event.deltaY < 0 ? 1.12 : .89, event.clientX, event.clientY); }, { capture: true, passive: false });
 mapLayer.addEventListener('selectstart', event => event.preventDefault()); mapLayer.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); mapLayer.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 mapLayer.addEventListener('pointerdown', event => { didDrag = false; mapLayer.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
 function movePointer(event) {
@@ -166,7 +187,8 @@ function movePointer(event) {
   if (pair.length === 2 && pinchStart) {
     didDrag = true;
     const pinch = pinchData(pair);
-    zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y);
+    zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y, false);
+    scheduleZoomRender();
   } else if (pair.length === 1 && dragStart) {
     const dx = point.clientX - dragStart.x, dy = point.clientY - dragStart.y;
     if (Math.hypot(dx, dy) > 4) didDrag = true;
