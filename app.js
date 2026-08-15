@@ -6,7 +6,7 @@ document.querySelector('[data-layer="connections"]')?.closest('label')?.remove()
 document.querySelector('.legend.civic')?.parentElement?.remove();
 const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const info = document.querySelector('#info');
 const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const stationList = document.querySelector('#station-list'); const zoomStatus = document.querySelector('#zoom-status');
-const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE = 180, limits = { min: .8, max: 5 };
+const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE = 280, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
@@ -139,7 +139,27 @@ document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.s
 [info, stationList].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 stage.addEventListener('selectstart', event => event.preventDefault()); stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); stage.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
-stage.addEventListener('pointermove', event => { if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 2 && pinchStart) { didDrag = true; const pinch = pinchData(pair); zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y); } else if (pair.length === 1 && dragStart) { const dx = event.clientX - dragStart.x, dy = event.clientY - dragStart.y; if (Math.hypot(dx, dy) > 4) didDrag = true; moveMapDuringDrag(dx, dy); if (Math.abs(dx) >= PAN_REBASE || Math.abs(dy) >= PAN_REBASE) { commitDrag(event.clientX, event.clientY); beginDrag(event.clientX, event.clientY); } } });
+function movePointer(event) {
+  const points = event.getCoalescedEvents?.() ?? [event], point = points[points.length - 1];
+  if (!pointers.has(point.pointerId)) return;
+  pointers.set(point.pointerId, { x: point.clientX, y: point.clientY });
+  const pair = [...pointers.values()];
+  if (pair.length === 2 && pinchStart) {
+    didDrag = true;
+    const pinch = pinchData(pair);
+    zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y);
+  } else if (pair.length === 1 && dragStart) {
+    const dx = point.clientX - dragStart.x, dy = point.clientY - dragStart.y;
+    if (Math.hypot(dx, dy) > 4) didDrag = true;
+    moveMapDuringDrag(dx, dy);
+    if (Math.abs(dx) >= PAN_REBASE || Math.abs(dy) >= PAN_REBASE) {
+      commitDrag(point.clientX, point.clientY);
+      beginDrag(point.clientX, point.clientY);
+    }
+  }
+}
+if ('onpointerrawupdate' in window) stage.addEventListener('pointerrawupdate', movePointer, { passive: true });
+else stage.addEventListener('pointermove', movePointer, { passive: true });
 function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
 function endPointer(event) {
   const isTap = event.button === 0 && !didDrag && pointers.size === 1;
