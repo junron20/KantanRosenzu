@@ -91,7 +91,9 @@ async function buildMapBitmap() {
     image.src = url;
     await image.decode();
     if (version !== mapBitmapVersion) return;
-    const ratio = window.devicePixelRatio || 1;
+    // A 1x preview cuts Canvas memory and texture bandwidth by up to 75% on
+    // high-DPI screens. It is used only while the wheel is moving.
+    const ratio = 1;
     mapBitmap.width = Math.round(width * ratio);
     mapBitmap.height = Math.round(height * ratio);
     const context = mapBitmap.getContext('2d');
