@@ -91,6 +91,12 @@ async function buildMapBitmap() {
     image.src = url;
     await image.decode();
     if (version !== mapBitmapVersion) return;
+    // Never replace the displayed bitmap halfway through a gesture. Doing so
+    // resets its transform and makes a drag jump backwards.
+    if (pointers.size || wheelPreview) {
+      mapBitmapTimer = setTimeout(buildMapBitmap, 50);
+      return;
+    }
     const ratio = window.devicePixelRatio || 1;
     mapBitmap.width = Math.round(width * ratio);
     mapBitmap.height = Math.round(height * ratio);
@@ -186,7 +192,16 @@ function previewDrag(clientX, clientY) {
     beginDrag(clientX, clientY);
   }
 }
-function beginDrag(clientX, clientY) { dragStart = { x: clientX, y: clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox(), rect: stage.getBoundingClientRect() }; }
+function beginDrag(clientX, clientY) {
+  // A new drag may begin before the post-drag bitmap is ready. Fold the old
+  // parent translation into the canvas so the next translation starts there.
+  if (mapBitmapReady && mapLayer.style.transform) {
+    mapBitmap.style.transform = `${mapLayer.style.transform} ${mapBitmap.style.transform}`.trim();
+    mapLayer.style.transform = '';
+    mapLayer.style.transformOrigin = '';
+  }
+  dragStart = { x: clientX, y: clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox(), rect: stage.getBoundingClientRect() };
+}
 function commitDrag(clientX, clientY) {
   if (!dragStart) return;
   previewDrag(clientX, clientY);
