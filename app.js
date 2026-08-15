@@ -9,7 +9,7 @@ const MAP_WIDTH = 1200, MAP_HEIGHT = 760, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
-const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity, dragFrame = null, pendingDrag = null;
+const pointers = new Map(); let dragStart = null, pinchStart = null, didDrag = false, handledTapAt = -Infinity;
 
 function esc(value) { return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }
 function groupStations(records) {
@@ -109,20 +109,7 @@ function updateDrag(clientX, clientY) {
   view.centerY = dragStart.centerY - dy * dragStart.box.height / rect.height;
   applyView();
 }
-function scheduleDrag(clientX, clientY) {
-  pendingDrag = { clientX, clientY };
-  if (dragFrame !== null) return;
-  dragFrame = requestAnimationFrame(() => {
-    dragFrame = null;
-    if (!pendingDrag) return;
-    updateDrag(pendingDrag.clientX, pendingDrag.clientY);
-    pendingDrag = null;
-  });
-}
 function commitDrag(clientX, clientY) {
-  if (dragFrame !== null) cancelAnimationFrame(dragFrame);
-  dragFrame = null;
-  pendingDrag = null;
   updateDrag(clientX, clientY);
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; applyView(); render(); }
@@ -142,7 +129,7 @@ document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.s
 [info, stationList].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 stage.addEventListener('selectstart', event => event.preventDefault()); stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); stage.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) dragStart = { x: event.clientX, y: event.clientY, centerX: view.centerX, centerY: view.centerY, box: viewBox() }; if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
-stage.addEventListener('pointermove', event => { if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 2 && pinchStart) { didDrag = true; const pinch = pinchData(pair); zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y); } else if (pair.length === 1 && dragStart) { const dx = event.clientX - dragStart.x, dy = event.clientY - dragStart.y; if (Math.hypot(dx, dy) > 4) didDrag = true; scheduleDrag(event.clientX, event.clientY); } });
+stage.addEventListener('pointermove', event => { if (!pointers.has(event.pointerId)) return; pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 2 && pinchStart) { didDrag = true; const pinch = pinchData(pair); zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y); } else if (pair.length === 1 && dragStart) { const dx = event.clientX - dragStart.x, dy = event.clientY - dragStart.y; if (Math.hypot(dx, dy) > 4) didDrag = true; updateDrag(event.clientX, event.clientY); } });
 function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
 function endPointer(event) {
   const isTap = event.button === 0 && !didDrag && pointers.size === 1;
