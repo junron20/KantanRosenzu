@@ -2,7 +2,7 @@ const data = window.TokyoJrData;
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./operator-icons.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./route-signs.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<style>.map-stage svg{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px)}</style>');
-document.head.insertAdjacentHTML('beforeend', '<style>#map-layer{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none;will-change:transform;transform:translate3d(0,0,0)}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
+document.head.insertAdjacentHTML('beforeend', '<style>#map-layer,#map-bitmap{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{display:none;pointer-events:none}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.data-label{pointer-events:auto;cursor:pointer}.data-label:hover{fill:#ef774c;font-weight:800}.info-line{display:grid;grid-template-columns:15px 17px 1fr;gap:6px;align-items:center;width:100%;padding:5px 7px;border:0;border-radius:4px;background:#e7f1ed;color:#33755f;font:10px \'Noto Sans JP\',sans-serif;cursor:pointer}.info-line input{accent-color:#17322d}.info-line:hover{filter:brightness(.95)}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:none}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}</style>');
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
@@ -182,14 +182,20 @@ function previewDrag(clientX, clientY) {
   view.centerX = dragStart.centerX - dx * dragStart.box.width / dragStart.rect.width;
   view.centerY = dragStart.centerY - dy * dragStart.box.height / dragStart.rect.height;
   clampView();
+  const renderedDx = -(view.centerX - dragStart.centerX) * dragStart.rect.width / dragStart.box.width;
+  const renderedDy = -(view.centerY - dragStart.centerY) * dragStart.rect.height / dragStart.box.height;
   if (mapBitmapReady) {
     updateBitmapTransform();
+    if (Math.abs(renderedDx) >= PAN_REBASE_DISTANCE || Math.abs(renderedDy) >= PAN_REBASE_DISTANCE) {
+      mapBitmapVersion++;
+      clearTimeout(mapBitmapTimer);
+      void buildMapBitmap();
+      beginDrag(clientX, clientY);
+    }
     return;
   }
   // Moving the already-painted SVG is a compositor operation. Rebuilding its viewBox
   // for every pointer sample forces the browser to repaint every path and label.
-  const renderedDx = -(view.centerX - dragStart.centerX) * dragStart.rect.width / dragStart.box.width;
-  const renderedDy = -(view.centerY - dragStart.centerY) * dragStart.rect.height / dragStart.box.height;
   mapLayer.style.transform = `translate3d(${renderedDx}px, ${renderedDy}px, 0)`;
   // Recenter before the composited overscan is exhausted. This keeps already
   // painted map content visible while avoiding a viewBox repaint per input event.
