@@ -7,7 +7,7 @@ document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:n
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
 document.querySelector('.legend.civic')?.parentElement?.remove();
 const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const info = document.querySelector('#info');
-const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const zoomStatus = document.querySelector('#zoom-status');
+const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const filterPanel = document.querySelector('.filter-panel'); const zoomStatus = document.querySelector('#zoom-status');
 const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
@@ -150,8 +150,10 @@ info.querySelector('h2').textContent = `${stationGroups.length}駅を表示中`;
 renderRoutes(); render(); applyView();
 search.addEventListener('input', render); document.querySelector('#clear').addEventListener('click', () => { search.value = ''; selectedLines.clear(); Object.keys(data.lines).forEach(line => selectedLines.add(line)); renderRoutes(); render(); }); document.querySelectorAll('[data-layer]').forEach(input => input.addEventListener('change', render));
 document.querySelector('#zoom-in').addEventListener('click', () => zoomAt(view.scale * 1.25)); document.querySelector('#zoom-out').addEventListener('click', () => zoomAt(view.scale / 1.25)); document.querySelector('#reset-view').addEventListener('click', resetView); document.querySelector('#close-card').addEventListener('click', clearStationSelection);
-// Keep the map's drag/pinch handlers from capturing clicks intended for card controls.
-[info, routeList, search].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
+// Keep map gestures inside the map. The filter panel lives in the stage so its
+// pointer and wheel events would otherwise bubble to the map handlers.
+[info, routeList, search, filterPanel].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
+filterPanel.addEventListener('wheel', event => event.stopPropagation());
 stage.addEventListener('selectstart', event => event.preventDefault()); stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); stage.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 stage.addEventListener('pointerdown', event => { didDrag = false; stage.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
 function movePointer(event) {
