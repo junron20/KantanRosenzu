@@ -1,15 +1,15 @@
 const data = window.TokyoJrData;
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./operator-icons.css"/>');
 document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="./route-signs.css"/>');
-document.head.insertAdjacentHTML('beforeend', '<style>.map-stage svg{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px)}</style>');
-document.head.insertAdjacentHTML('beforeend', '<style>#map-layer,#map-bitmap{position:absolute;left:-320px;top:-320px;width:calc(100% + 640px);height:calc(100% + 640px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{display:none;pointer-events:none}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
+document.head.insertAdjacentHTML('beforeend', '<style>.map-stage svg{position:absolute;left:-1024px;top:-1024px;width:calc(100% + 2048px);height:calc(100% + 2048px)}</style>');
+document.head.insertAdjacentHTML('beforeend', '<style>#map-layer,#map-bitmap{position:absolute;left:-1024px;top:-1024px;width:calc(100% + 2048px);height:calc(100% + 2048px);contain:paint;will-change:transform;transform:translate3d(0,0,0)}#map-bitmap{display:none;pointer-events:none}#map-layer svg{position:static;display:block;width:100%;height:100%;min-height:0;will-change:auto}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.data-label{pointer-events:auto;cursor:pointer}.data-label:hover{fill:#ef774c;font-weight:800}.info-line{display:grid;grid-template-columns:15px 17px 1fr;gap:6px;align-items:center;width:100%;padding:5px 7px;border:0;border-radius:4px;background:#e7f1ed;color:#33755f;font:10px \'Noto Sans JP\',sans-serif;cursor:pointer}.info-line input{accent-color:#17322d}.info-line:hover{filter:brightness(.95)}</style>');
 document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:none}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}</style>');
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
 document.querySelector('.legend.civic')?.parentElement?.remove();
 const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const mapLayer = document.createElement('div'); mapLayer.id = 'map-layer'; map.before(mapLayer); mapLayer.append(map); const mapBitmap = document.createElement('canvas'); mapBitmap.id = 'map-bitmap'; mapLayer.before(mapBitmap); const info = document.querySelector('#info');
 const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const filterPanel = document.querySelector('.filter-panel'); const zoomStatus = document.querySelector('#zoom-status');
-const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 320, PAN_REBASE_DISTANCE = PAN_OVERSCAN - 96, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
+const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 1024, PAN_REBASE_DISTANCE = PAN_OVERSCAN - 160, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
 const stationById = new Map(stationGroups.map(station => [station.id, station]));
 const selectedLines = new Set(Object.keys(data.lines)); const view = { scale: 1, centerX: MAP_WIDTH / 2, centerY: MAP_HEIGHT / 2 }; let selectedStationId = null;
@@ -77,12 +77,16 @@ function mapStylesForBitmap() {
 async function buildMapBitmap() {
   const version = mapBitmapVersion, width = mapLayer.clientWidth, height = mapLayer.clientHeight;
   if (!width || !height) return;
+  const ratio = .5;
   applyView();
   const sourceView = { ...view };
   const clone = map.cloneNode(true);
+  // The live SVG is hidden once the first bitmap is ready. Do not copy that
+  // presentation state into later snapshots or the refreshed canvas is blank.
+  clone.style.opacity = '1';
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clone.setAttribute('width', width);
-  clone.setAttribute('height', height);
+  clone.setAttribute('width', Math.round(width * ratio));
+  clone.setAttribute('height', Math.round(height * ratio));
   const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
   style.textContent = mapStylesForBitmap();
   clone.prepend(style);
@@ -94,7 +98,6 @@ async function buildMapBitmap() {
     await image.decode();
     if (version !== mapBitmapVersion) return;
     // Keep the interactive texture deliberately small.
-    const ratio = 1;
     mapBitmap.width = Math.round(width * ratio);
     mapBitmap.height = Math.round(height * ratio);
     const context = mapBitmap.getContext('2d');
