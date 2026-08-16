@@ -162,6 +162,9 @@ function selectStation(station) {
     return;
   }
   selectedStationId = station.id;
+  selectedLines.clear();
+  station.lines.forEach(line => selectedLines.add(line));
+  renderRoutes();
   showStation(station);
   render();
 }
