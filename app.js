@@ -57,7 +57,7 @@ function polygonPath(geometry) { const polygons = geometry.type === 'MultiPolygo
 function visibleStations() { const term = search.value.trim().toLocaleLowerCase('ja'); return stationGroups.filter(station => station.lines.some(line => selectedLines.has(line)) && (!term || station.name.toLocaleLowerCase('ja').includes(term) || station.lines.some(line => line.toLocaleLowerCase('ja').includes(term)))); }
 function focusLines(lines) { selectedLines.clear(); lines.forEach(line => selectedLines.add(line)); renderRoutes(); render(); refreshSelectedStationCard(); }
 function showStation(station) { const interchange = station.lines.length > 1; info.querySelector('.card-type').innerHTML = `${stationOperatorIcons(station)}<span>${interchange ? '乗換駅' : operatorName(station.operators?.[0])}</span>`; info.querySelector('h2').textContent = station.name; info.querySelector('p').textContent = `${station.operators?.join('・') ?? ''} / この駅に接続する路線をハイライトしています。`; info.querySelector('.card-tags').innerHTML = station.lines.map(line => `<button class="info-line" data-focus-line="${esc(line)}" style="--tag-color:${lineColor(line)}">${esc(line)}</button>`).join(''); info.querySelectorAll('[data-focus-line]').forEach(button => button.addEventListener('click', () => focusLines([button.dataset.focusLine]))); info.classList.remove('hidden'); }
-function selectStation(station) { selectedStationId = station.id; selectedLines.clear(); station.lines.forEach(line => selectedLines.add(line)); renderRoutes(); showStation(station); render(); }
+function selectStation(station) { selectedStationId = station.id; showStation(station); render(); }
 function labelLayout(stations) { const fontSize = Math.max(4.8, 8.4 / Math.sqrt(view.scale)); const accepted = []; const boxes = []; const ordered = [...stations].sort((a, b) => Number(b.id === selectedStationId) - Number(a.id === selectedStationId) || b.lines.length - a.lines.length || a.name.localeCompare(b.name, 'ja')); for (const station of ordered) { const [x, y] = project([station.longitude, station.latitude]); const width = station.name.length * fontSize * 1.12; const box = { left: x + fontSize, right: x + fontSize + width, top: y - fontSize * 1.6, bottom: y + fontSize * .35 }; const collides = boxes.some(other => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top); if (station.id === selectedStationId || !collides) { accepted.push({ station, x, y, fontSize }); boxes.push(box); } } return accepted; }
 function render() {
   const stations = visibleStations();
@@ -72,7 +72,7 @@ function render() {
   queueMapBitmap();
 }
 function mapStylesForBitmap() {
-  return 'svg{shape-rendering:geometricPrecision;text-rendering:geometricPrecision}.municipal-boundary{fill:#e6ede7;stroke:#b9c8bd;stroke-width:1.4;vector-effect:non-scaling-stroke}.rail-geometry{fill:none;stroke:var(--line-color);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;opacity:.86;vector-effect:non-scaling-stroke}.rail-geometry.seibu-geometry{stroke-width:4}.rail-geometry.is-dimmed{opacity:.13}.rail-geometry.is-highlighted{stroke-width:7;opacity:1}.data-station circle{fill:#ef774c;stroke:#fff;stroke-width:1.5;vector-effect:non-scaling-stroke}.data-station.seibu circle{fill:#f4bd20}.data-station.metro circle{fill:#667783}.data-station.interchange circle{fill:#17322d;stroke:#f8c154;stroke-width:2;vector-effect:non-scaling-stroke}.data-station.is-selected circle{stroke:#17322d;stroke-width:3;filter:drop-shadow(0 0 3px #fff)}.data-label{font-family:"Noto Sans JP",sans-serif;fill:#254039;paint-order:stroke;stroke:#f3f5f0;stroke-width:3px;stroke-linejoin:round}.seibu-label{fill:#6d5512}.metro-label{fill:#405260}.is-selected-label{font-weight:800;fill:#17322d}.hidden{display:none!important}';
+  return 'svg{shape-rendering:geometricPrecision;text-rendering:geometricPrecision}.municipal-boundary{fill:#e6ede7;stroke:#b9c8bd;stroke-width:1.4;vector-effect:non-scaling-stroke}.rail-geometry{fill:none;stroke:var(--line-color);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;opacity:.86;vector-effect:non-scaling-stroke}.rail-geometry.seibu-geometry{stroke-width:4}.rail-geometry.is-dimmed{opacity:.13}.rail-geometry.is-highlighted{stroke-width:7;opacity:1}.connection-mark{display:none}.data-station circle{fill:#ef774c;stroke:#fff;stroke-width:1.5;vector-effect:non-scaling-stroke}.data-station.seibu circle{fill:#f4bd20}.data-station.metro circle{fill:#667783}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}.data-station.is-selected circle{stroke:#17322d;stroke-width:3;filter:drop-shadow(0 0 3px #fff)}.data-label{font-family:"Noto Sans JP",sans-serif;fill:#254039;paint-order:stroke;stroke:#f3f5f0;stroke-width:3px;stroke-linejoin:round}.seibu-label{fill:#6d5512}.metro-label{fill:#405260}.is-selected-label{font-weight:800;fill:#17322d}.hidden{display:none!important}';
 }
 function showBitmapMap() {
   if (!mapBitmapReady) return;
@@ -162,9 +162,6 @@ function selectStation(station) {
     return;
   }
   selectedStationId = station.id;
-  selectedLines.clear();
-  station.lines.forEach(line => selectedLines.add(line));
-  renderRoutes();
   showStation(station);
   render();
 }
