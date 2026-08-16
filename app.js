@@ -74,6 +74,16 @@ function render() {
 function mapStylesForBitmap() {
   return '.municipal-boundary{fill:#e6ede7;stroke:#b9c8bd;stroke-width:1.4}.rail-geometry{fill:none;stroke:var(--line-color);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;opacity:.86}.rail-geometry.seibu-geometry{stroke-width:4}.rail-geometry.is-dimmed{opacity:.13}.rail-geometry.is-highlighted{stroke-width:7;opacity:1}.data-station circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.seibu circle{fill:#f4bd20}.data-station.metro circle{fill:#667783}.data-station.interchange circle{fill:#17322d;stroke:#f8c154;stroke-width:2}.data-station.is-selected circle{stroke:#17322d;stroke-width:3}.data-label{font-family:"Noto Sans JP",sans-serif;fill:#254039;paint-order:stroke;stroke:#f3f5f0;stroke-width:3px;stroke-linejoin:round}.seibu-label{fill:#6d5512}.metro-label{fill:#405260}.is-selected-label{font-weight:800;fill:#17322d}.hidden{display:none!important}';
 }
+function showBitmapMap() {
+  if (!mapBitmapReady) return;
+  mapBitmap.style.display = 'block';
+  map.style.opacity = '0';
+}
+function showVectorMap() {
+  map.style.opacity = '1';
+  mapBitmap.style.display = 'none';
+  mapBitmap.style.transform = '';
+}
 async function buildMapBitmap() {
   const version = mapBitmapVersion, width = mapLayer.clientWidth, height = mapLayer.clientHeight;
   if (!width || !height) return;
@@ -106,9 +116,9 @@ async function buildMapBitmap() {
     context.drawImage(image, 0, 0, width, height);
     bitmapView = sourceView;
     mapBitmapReady = true;
-    mapBitmap.style.display = 'block';
-    map.style.opacity = '0';
     updateBitmapTransform();
+    if (pointers.size || wheelPreview) showBitmapMap();
+    else showVectorMap();
   } catch { mapBitmapReady = false; }
   finally { URL.revokeObjectURL(url); }
 }
@@ -214,6 +224,7 @@ function commitDrag(clientX, clientY) {
   previewDrag(clientX, clientY);
   applyView();
   mapLayer.style.transform = '';
+  showVectorMap();
   queueMapBitmap();
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true, shouldApplyView = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; if (shouldApplyView) applyView(); if (shouldRender) render(); }
@@ -225,8 +236,10 @@ function commitWheelZoom() {
   wheelPreview = null;
   applyView();
   render();
+  showVectorMap();
 }
 function queueWheelZoom(factor, clientX, clientY) {
+  showBitmapMap();
   wheelPreview = true;
   zoomAt(view.scale * factor, clientX, clientY, false, false);
   updateBitmapTransform();
@@ -247,7 +260,7 @@ document.querySelector('#zoom-in').addEventListener('click', () => { commitWheel
 [info, routeList, search, filterPanel].forEach(element => element.addEventListener('pointerdown', event => event.stopPropagation()));
 filterPanel.addEventListener('wheel', event => event.stopPropagation());
 mapLayer.addEventListener('wheel', event => { event.preventDefault(); event.stopImmediatePropagation(); queueWheelZoom(event.deltaY < 0 ? 1.12 : .89, event.clientX, event.clientY); }, { capture: true, passive: false });
-mapLayer.addEventListener('pointerdown', commitWheelZoom, { capture: true });
+mapLayer.addEventListener('pointerdown', event => { commitWheelZoom(); if (event.button === 0) showBitmapMap(); }, { capture: true });
 mapLayer.addEventListener('selectstart', event => event.preventDefault()); mapLayer.addEventListener('wheel', event => { event.preventDefault(); zoomAt(view.scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX, event.clientY); }, { passive: false }); mapLayer.addEventListener('dblclick', event => { event.preventDefault(); zoomAt(view.scale * 1.5, event.clientX, event.clientY); });
 mapLayer.addEventListener('pointerdown', event => { didDrag = false; mapLayer.setPointerCapture(event.pointerId); pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); const pair = [...pointers.values()]; if (pair.length === 1) beginDrag(event.clientX, event.clientY); if (pair.length === 2) { commitDrag(pair[0].x, pair[0].y); pinchStart = { ...pinchData(pair), scale: view.scale }; } });
 function movePointer(event) {
@@ -289,6 +302,7 @@ function endPointer(event) {
     }
   }
   if (isTap) {
+    showVectorMap();
     handledTapAt = performance.now();
     activateMapTarget(target);
   }
