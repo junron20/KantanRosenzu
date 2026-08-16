@@ -293,14 +293,7 @@ function endPointer(event) {
   if (isDrag) commitDrag(event.clientX, event.clientY);
   pointers.delete(event.pointerId);
   if (pointers.size < 2) pinchStart = null;
-  if (!pointers.size) {
-    dragStart = null;
-    if (!isDrag && dragBitmapActive) {
-      map.style.visibility = '';
-      mapBitmap.style.display = 'none';
-      dragBitmapActive = false;
-    }
-  }
+  if (!pointers.size) { dragStart = null; showVectorMap(); }
   if (isTap) {
     showVectorMap();
     handledTapAt = performance.now();
