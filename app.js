@@ -7,7 +7,7 @@ document.head.insertAdjacentHTML('beforeend', '<style>.data-label{pointer-events
 document.head.insertAdjacentHTML('beforeend', '<style>.connection-mark{display:none}.data-station.interchange:not(.seibu):not(.metro) circle{fill:#ef774c;stroke:#fff;stroke-width:1.5}.data-station.interchange.seibu circle{fill:#f4bd20;stroke:#fff;stroke-width:1.5}.data-station.interchange.metro circle{fill:#667783;stroke:#fff;stroke-width:1.5}</style>');
 document.querySelector('[data-layer="connections"]')?.closest('label')?.remove();
 document.querySelector('.legend.civic')?.parentElement?.remove();
-const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const mapLayer = document.createElement('div'); mapLayer.id = 'map-layer'; map.before(mapLayer); mapLayer.append(map); const mapBitmap = document.createElement('canvas'); mapBitmap.id = 'map-bitmap'; mapLayer.before(mapBitmap); const info = document.querySelector('#info');
+const stage = document.querySelector('#stage'); const map = document.querySelector('#map'); const mapLayer = document.createElement('div'); mapLayer.id = 'map-layer'; map.before(mapLayer); mapLayer.append(map); map.style.opacity = '0'; const mapBitmap = document.createElement('canvas'); mapBitmap.id = 'map-bitmap'; mapLayer.before(mapBitmap); const info = document.querySelector('#info');
 const search = document.querySelector('#search'); const routeList = document.querySelector('#route-list'); const filterPanel = document.querySelector('.filter-panel'); const zoomStatus = document.querySelector('#zoom-status');
 const MAP_WIDTH = 1200, MAP_HEIGHT = 760, PAN_OVERSCAN = 1024, PAN_REBASE_DISTANCE = PAN_OVERSCAN - 160, PAN_VISIBLE_EDGE = 2, limits = { min: .8, max: 5 };
 const stationGroups = groupStations(data.stations);
@@ -80,9 +80,7 @@ function showBitmapMap() {
   map.style.opacity = '0';
 }
 function showVectorMap() {
-  map.style.opacity = '1';
-  mapBitmap.style.display = 'none';
-  mapBitmap.style.transform = '';
+  showBitmapMap();
 }
 async function buildMapBitmap() {
   const version = mapBitmapVersion, width = mapLayer.clientWidth, height = mapLayer.clientHeight;
@@ -117,8 +115,7 @@ async function buildMapBitmap() {
     bitmapView = sourceView;
     mapBitmapReady = true;
     updateBitmapTransform();
-    if (pointers.size || wheelPreview) showBitmapMap();
-    else showVectorMap();
+    showBitmapMap();
   } catch { mapBitmapReady = false; }
   finally { URL.revokeObjectURL(url); }
 }
