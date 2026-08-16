@@ -53,6 +53,10 @@ function lineColor(line) { const colors = { '池袋線':'#e85f25','新宿線':'#
 function geoProjector() { const stations = stationGroups; const minLng = Math.min(...stations.map(s => s.longitude)) - .025, maxLng = Math.max(...stations.map(s => s.longitude)) + .025, minLat = Math.min(...stations.map(s => s.latitude)) - .02, maxLat = Math.max(...stations.map(s => s.latitude)) + .02; return ([lng, lat]) => [((lng - minLng) / (maxLng - minLng)) * MAP_WIDTH, MAP_HEIGHT - ((lat - minLat) / (maxLat - minLat)) * MAP_HEIGHT]; }
 const project = geoProjector();
 function pathFor(geometry) { const lines = geometry.type === 'MultiLineString' ? geometry.coordinates : [geometry.coordinates]; return lines.map(line => line.map((point, index) => { const [x, y] = project(point); return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ')).join(' '); }
+function yamanoteClosurePath() {
+  const names = ['田端', '西日暮里', '日暮里', '鶯谷', '上野', '御徒町', '秋葉原', '神田', '東京', '有楽町', '新橋', '浜松町', '田町', '品川'];
+  return names.map(name => stationGroups.find(station => station.name === name)).filter(Boolean).map((station, index) => { const [x, y] = project([station.longitude, station.latitude]); return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+}
 function polygonPath(geometry) { const polygons = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates]; return polygons.flatMap(polygon => polygon).map(ring => ring.map((point, index) => { const [x, y] = project(point); return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ') + 'Z').join(' '); }
 function visibleStations() { const term = search.value.trim().toLocaleLowerCase('ja'); return stationGroups.filter(station => station.lines.some(line => selectedLines.has(line)) && (!term || station.name.toLocaleLowerCase('ja').includes(term) || station.lines.some(line => line.toLocaleLowerCase('ja').includes(term)))); }
 function focusLines(lines) { selectedLines.clear(); lines.forEach(line => selectedLines.add(line)); renderRoutes(); render(); refreshSelectedStationCard(); }
@@ -63,7 +67,7 @@ function render() {
   const stations = visibleStations();
   const selectedStation = stationById.get(selectedStationId) ?? null;
   const boundaryPaths = (data.boundaries ?? []).map(boundary => `<path class="municipal-boundary" d="${polygonPath(boundary.geometry)}"><title>${esc(boundary.name)}</title></path>`).join('');
-  const railPaths = (data.railways ?? []).filter(railway => selectedLines.has(railway.line)).map(railway => `<path class="rail-geometry${isSeibuLine(railway.line) ? ' seibu-geometry' : ''}${selectedStation ? (selectedStation.lines.includes(railway.line) ? ' is-highlighted' : ' is-dimmed') : ''}" data-map-line="${esc(railway.line)}" style="--line-color:${lineColor(railway.line)}" d="${pathFor(railway.geometry)}"/>`).join('');
+  const railPaths = (data.railways ?? []).filter(railway => selectedLines.has(railway.line)).map(railway => `<path class="rail-geometry${isSeibuLine(railway.line) ? ' seibu-geometry' : ''}${selectedStation ? (selectedStation.lines.includes(railway.line) ? ' is-highlighted' : ' is-dimmed') : ''}" data-map-line="${esc(railway.line)}" style="--line-color:${lineColor(railway.line)}" d="${pathFor(railway.geometry)}${railway.line === '山手線' ? ` ${yamanoteClosurePath()}` : ''}"/>`).join('');
   const marks = stations.filter(station => station.lines.length > 1).map(station => { const [x, y] = project([station.longitude, station.latitude]); return `<circle class="connection-mark" cx="${x}" cy="${y}" r="9"/>`; }).join('');
   const dots = stations.map(station => { const [x, y] = project([station.longitude, station.latitude]); const radius = (station.lines.length > 1 ? 6 : 4) / Math.sqrt(view.scale); return `<g class="data-station${station.lines.length > 1 ? ' interchange' : ''}${isSeibu(station) ? ' seibu' : ''}${isMetro(station) ? ' metro' : ''}${station.id === selectedStationId ? ' is-selected' : ''}" data-station-id="${station.id}"><circle cx="${x}" cy="${y}" r="${station.id === selectedStationId ? radius * 1.65 : radius}"/><title>${esc(station.name)} — ${esc(station.lines.join('・'))}</title></g>`; }).join('');
   const labels = labelLayout(stations).map(({ station, x, y, fontSize }) => `<text class="data-label${isSeibu(station) ? ' seibu-label' : ''}${isMetro(station) ? ' metro-label' : ''}${station.id === selectedStationId ? ' is-selected-label' : ''}" data-station-id="${station.id}" x="${x + fontSize}" y="${y - fontSize}" font-size="${fontSize}" role="button" tabindex="0">${esc(station.name)}</text>`).join('');
@@ -282,7 +286,20 @@ function movePointer(event) {
 // that expose raw samples avoid the frame of latency added by pointermove.
 mapLayer.addEventListener('pointermove', movePointer, { passive: true });
 if ('onpointerrawupdate' in window) mapLayer.addEventListener('pointerrawupdate', movePointer, { passive: true });
-function activateMapTarget(target) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const station = stationById.get(stationNode.dataset.stationId); if (station) { selectStation(station); return true; } } const lineNode = target?.closest?.('[data-map-line]'); if (lineNode) { focusLines([lineNode.dataset.mapLine]); return true; } return false; }
+function stationAtPoint(clientX, clientY) {
+  const matrix = map.getScreenCTM();
+  if (!matrix) return null;
+  let closest = null;
+  for (const station of visibleStations()) {
+    const [x, y] = project([station.longitude, station.latitude]);
+    const point = new DOMPoint(x, y).matrixTransform(matrix);
+    const distance = Math.hypot(clientX - point.x, clientY - point.y);
+    const hitRadius = station.lines.length > 1 ? 16 : 12;
+    if (distance <= hitRadius && (!closest || distance < closest.distance)) closest = { station, distance };
+  }
+  return closest?.station ?? null;
+}
+function activateMapTarget(target, clientX, clientY) { const stationNode = target?.closest?.('[data-station-id]'); if (stationNode) { const targetStation = stationById.get(stationNode.dataset.stationId); if (targetStation) { selectStation(targetStation); return true; } } const station = stationAtPoint(clientX, clientY); if (station) { selectStation(station); return true; } return false; }
 function endPointer(event) {
   const isTap = event.button === 0 && !didDrag && pointers.size === 1;
   const isDrag = didDrag && pointers.size === 1;
@@ -294,13 +311,13 @@ function endPointer(event) {
   if (isTap) {
     showVectorMap();
     handledTapAt = performance.now();
-    activateMapTarget(target);
+    activateMapTarget(target, event.clientX, event.clientY);
   }
 }
 mapLayer.addEventListener('pointerup', endPointer); mapLayer.addEventListener('pointercancel', endPointer);
 mapLayer.addEventListener('click', event => {
   if (didDrag) return;
   if (performance.now() - handledTapAt < 500) return;
-  activateMapTarget(event.target);
+  activateMapTarget(event.target, event.clientX, event.clientY);
 });
 stage.addEventListener('keydown', event => { const shift = 48 / view.scale; if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomAt(view.scale * 1.2); } else if (event.key === '-') { event.preventDefault(); zoomAt(view.scale / 1.2); } else if (event.key === '0') { event.preventDefault(); resetView(); } else if ({ArrowLeft:1,ArrowRight:1,ArrowUp:1,ArrowDown:1}[event.key]) { event.preventDefault(); view.centerX += event.key === 'ArrowLeft' ? -shift : event.key === 'ArrowRight' ? shift : 0; view.centerY += event.key === 'ArrowUp' ? -shift : event.key === 'ArrowDown' ? shift : 0; applyView(); } });
