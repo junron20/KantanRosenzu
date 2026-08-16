@@ -229,15 +229,14 @@ function commitDrag(clientX, clientY) {
   queueMapBitmap();
 }
 function zoomAt(nextScale, clientX = stage.getBoundingClientRect().left + stage.clientWidth / 2, clientY = stage.getBoundingClientRect().top + stage.clientHeight / 2, shouldRender = true, shouldApplyView = true) { const oldBox = viewBox(), rect = stage.getBoundingClientRect(), fx = (clientX - rect.left) / rect.width, fy = (clientY - rect.top) / rect.height, focusX = oldBox.x + oldBox.width * fx, focusY = oldBox.y + oldBox.height * fy; view.scale = Math.max(limits.min, Math.min(limits.max, nextScale)); const nextBox = viewBox(); view.centerX = focusX + nextBox.width / 2 - nextBox.width * fx; view.centerY = focusY + nextBox.height / 2 - nextBox.height * fy; if (shouldApplyView) applyView(); if (shouldRender) render(); }
-function scheduleZoomRender() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; render(); }, 100); }
+function scheduleZoomRefresh() { clearTimeout(wheelRenderTimer); wheelRenderTimer = setTimeout(() => { wheelRenderTimer = 0; applyView(); queueMapBitmap(); }, 240); }
 function commitWheelZoom() {
   if (!wheelPreview) return;
   clearTimeout(wheelRenderTimer);
   wheelRenderTimer = 0;
   wheelPreview = null;
   applyView();
-  render();
-  showVectorMap();
+  queueMapBitmap();
 }
 function queueWheelZoom(factor, clientX, clientY) {
   showBitmapMap();
@@ -275,7 +274,7 @@ function movePointer(event) {
     const pinch = pinchData(pair);
     zoomAt(pinchStart.scale * pinch.distance / pinchStart.distance, pinch.x, pinch.y, false, false);
     updateBitmapTransform();
-    scheduleZoomRender();
+    scheduleZoomRefresh();
   } else if (pair.length === 1 && dragStart) {
     const dx = point.clientX - dragStart.x, dy = point.clientY - dragStart.y;
     if (Math.hypot(dx, dy) > 4) didDrag = true;
